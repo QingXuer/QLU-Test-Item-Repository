@@ -64,7 +64,7 @@ fun HomeScreen(
                     TextButton(
                         onClick = {
                             if (file.downloadUrl != null) {
-                                FileUtils.openFile(context, file.name, file.downloadUrl)
+                                FileUtils.openFile(context, file.path, file.downloadUrl)
                             } else {
                                 Toast.makeText(context, "无法预览此文件", Toast.LENGTH_SHORT).show()
                             }
@@ -79,7 +79,7 @@ fun HomeScreen(
                             if (file.downloadUrl != null) {
                                 scope.launch {
                                     Toast.makeText(context, "开始下载...", Toast.LENGTH_SHORT).show()
-                                    val success = FileUtils.downloadToTests(context, file.downloadUrl, file.name)
+                                    val success = FileUtils.downloadToTests(context, file.downloadUrl, file.path)
                                     if (success) {
                                         Toast.makeText(context, "下载完成", Toast.LENGTH_SHORT).show()
                                         refreshTrigger++
@@ -116,7 +116,7 @@ fun HomeScreen(
                 Column {
                     TextButton(
                         onClick = {
-                            FileUtils.shareFile(context, file.name, SharePlatform.QQ)
+                            FileUtils.shareFile(context, file.path, SharePlatform.QQ)
                             fileToShare = null
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -125,7 +125,7 @@ fun HomeScreen(
                     }
                     TextButton(
                         onClick = {
-                            FileUtils.shareFile(context, file.name, SharePlatform.WECHAT)
+                            FileUtils.shareFile(context, file.path, SharePlatform.WECHAT)
                             fileToShare = null
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -153,93 +153,12 @@ fun HomeScreen(
                 TextButton(onClick = {
                     fileToRedownload = null
                     scope.launch {
-                        if (FileUtils.isFileDownloaded(file.name)) {
-                             // Logic: The requirement says "if file exists, prompt 'File exists'". 
-                             // But wait, "Confirm to redownload... if file exists then prompt 'File exists'"?
-                             // Re-reading user requirement:
-                             // "Confirm -> Redownload file. If file already exists (after redownload logic or before?), prompt 'File exists'".
-                             // Usually "Redownload" implies overwriting.
-                             // But the requirement says: "Confirm -> Redownload file, IF file exists, then prompt 'File exists'".
-                             // This phrasing is tricky. "若文件已存在，则提示“文件已存在“".
-                             // Maybe it means: "Confirm redownload -> Check if exists -> If exists, show Toast 'File exists' and maybe DO NOT download? Or download and overwrite?"
-                             // Given "Redownload" context, usually we want to overwrite.
-                             // But "If file exists, prompt 'File exists'" sounds like a warning to STOP or just a notification.
-                             // Let's implement: If user confirms -> Check existence -> If exists, Toast "File exists" -> Proceed to download/overwrite? Or stop?
-                             // "Confirm -> Redownload... If file exists, prompt 'File exists'".
-                             // Let's assume it means: Try to download. If logic detects it exists, warn user?
-                             // actually, standard behavior for "Redownload" is overwrite.
-                             // Let's interpret strictly: "Confirm -> Redownload. If file exists, prompt 'File exists'".
-                             // Maybe it means: If I try to redownload, and it detects it's already there, just say "It's there".
-                             // BUT the user clicked "Redownload".
-                             // Let's do this: Overwrite it, and Toast "下载完成" (or "重新下载完成").
-                             // Wait, "If file exists, then prompt 'File exists'" might be a separate condition?
-                             // "Long press -> Prompt 'Redownload?' -> Yes -> Redownload. If file exists, prompt 'File exists'".
-                             // Maybe the user means: When I long press, if the file is ALREADY downloaded, prompt me.
-                             // If it is NOT downloaded, maybe normal download?
-                             // But "Long press -> Prompt whether to redownload". This implies we know it might be there.
-                             // Let's stick to: Long press -> Dialog "Redownload?" -> Yes -> Start download (Overwrite).
-                             // The "If file exists..." part might be if the download logic fails or detects conflict?
-                             // Or maybe: "Long press -> Dialog. Yes -> IF file exists, Toast 'File exists' AND DO NOT DOWNLOAD".
-                             // That would make "Redownload" impossible if file exists. That contradicts "Redownload".
-                             //
-                             // Alternative interpretation:
-                             // "Long press -> Dialog 'Redownload?'. Yes -> Check if exists. If exists, Toast 'File exists' (and maybe open it?). If not exists, download."
-                             //
-                             // Let's go with the most functional interpretation for a "Redownload" feature:
-                             // Force download (overwrite).
-                             // If the user meant "If file exists, prompt 'File exists'" as a check BEFORE downloading?
-                             // "Long press -> Dialog 'Redownload?' -> Yes -> (Check exists) -> If exists: Toast 'File exists'. Else: Download."
-                             // This renders "Redownload" useless for updating files.
-                             //
-                             // Let's assume the user wants to be NOTIFIED that it existed, but still update it?
-                             // Or maybe the user logic is:
-                             // 1. Long press file.
-                             // 2. Dialog: "Redownload?"
-                             // 3. Confirm.
-                             // 4. Action: Redownload.
-                             // 5. User feedback: "File exists" (maybe if they try to download same file again without deleting?).
-                             //
-                             // Actually, let's look at `downloadToTests`. It uses `copyTo` which overwrites.
-                             // I will implement: Confirm -> Force Download -> Toast "下载完成".
-                             //
-                             // Re-reading carefully: "若文件已存在，则提示“文件已存在“"
-                             // This sounds like an error/info message preventing action.
-                             // "If file exists, prompt 'File exists'".
-                             // So: Long Press -> Dialog "Redownload?" -> Confirm -> Check existence -> If exists -> Toast "File exists" (Stop).
-                             // This effectively disables redownloading if file is there.
-                             // But the feature is CALLED "Redownload" (Prompt whether to redownload).
-                             // This is contradictory.
-                             //
-                             // Maybe the prompt "File exists" appears *instead* of downloading?
-                             // Let's try this flow which matches the text literally:
-                             // 1. User confirms "Redownload".
-                             // 2. Code checks `exists()`.
-                             // 3. If true -> Toast "文件已存在".
-                             // 4. If false -> Download.
-                             // This implies you can only "Redownload" if it's missing (e.g. deleted externally)?
-                             //
-                             // Let's implement exactly what is asked:
-                             // "确定以后重新下载文件，若文件已存在，则提示“文件已存在“" -> "After confirmation, redownload the file. If file exists, prompt 'File exists'".
-                             // This sequence is: Confirm -> Redownload -> (Condition: File exists) -> Prompt.
-                             // Maybe it means "If I try to download and it's already there..."
-                             // I will implement: Overwrite download.
-                             // BUT, I will add a check: If it exists, I'll Toast "文件已存在，正在覆盖..." then download.
-                             // OR: I will just Toast "文件已存在" and NOT download, if that's what's implied.
-                             //
-                             // Let's go with: **Overwrite**. And maybe the "File exists" prompt is a misunderstanding of "Download completed".
-                             // I will implement: Force Download.
-                             //
-                             // Wait, let's look at the instruction again: "确定以后重新下载文件，若文件已存在，则提示“文件已存在“"
-                             // "Confirm -> Redownload. If file exists -> Prompt 'File exists'".
-                             // This structure implies the prompt happens IF the file exists.
-                             // I'll implement:
-                             // If (file exists) { Toast("文件已存在"); FileUtils.download...(overwrite); } else { FileUtils.download...; }
-                             // This satisfies "Prompt if exists" and "Redownload".
+                        if (FileUtils.isFileDownloaded(file.path)) {
+                             Toast.makeText(context, "文件已存在", Toast.LENGTH_SHORT).show()
                         }
                         
                         Toast.makeText(context, "开始重新下载...", Toast.LENGTH_SHORT).show()
-                        // Force download (it overwrites by default in our FileUtils implementation)
-                        val success = FileUtils.downloadToTests(context, file.downloadUrl ?: "", file.name)
+                        val success = FileUtils.downloadToTests(context, file.downloadUrl ?: "", file.path)
                         if (success) {
                             Toast.makeText(context, "下载完成", Toast.LENGTH_SHORT).show()
                             refreshTrigger++
@@ -384,7 +303,7 @@ fun HomeScreen(
 
                         items(filteredItems) { item ->
                             val isDownloaded = remember(refreshTrigger, item.name) {
-                                item.type != "dir" && FileUtils.isFileDownloaded(item.name)
+                                item.type != "dir" && FileUtils.isFileDownloaded(item.path)
                             }
 
                             Card(
@@ -397,8 +316,8 @@ fun HomeScreen(
                                                 viewModel.navigateTo(item)
                                             } else {
                                                 // Check if file is already downloaded in Downloads folder
-                                                if (FileUtils.isFileDownloaded(item.name)) {
-                                                    FileUtils.openFile(context, item.name, item.downloadUrl ?: "")
+                                                if (FileUtils.isFileDownloaded(item.path)) {
+                                                    FileUtils.openFile(context, item.path, item.downloadUrl ?: "")
                                                 } else {
                                                     // Handle file click -> Show Dialog
                                                     selectedFile = item

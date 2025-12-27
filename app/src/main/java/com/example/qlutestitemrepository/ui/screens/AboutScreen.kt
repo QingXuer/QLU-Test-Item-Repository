@@ -100,7 +100,7 @@ fun AboutScreen(navController: NavController) {
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
         Text(
-            text = "version:1.0v",
+            text = "版本:v1.1",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier

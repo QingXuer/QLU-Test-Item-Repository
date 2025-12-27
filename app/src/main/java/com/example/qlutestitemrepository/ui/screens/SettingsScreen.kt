@@ -4,9 +4,10 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.WbSunny
@@ -29,7 +30,6 @@ import com.example.qlutestitemrepository.ui.DataSource
 import com.example.qlutestitemrepository.ui.MainViewModel
 import com.example.qlutestitemrepository.ui.navigation.Screen
 import com.example.qlutestitemrepository.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,13 +44,20 @@ fun SettingsScreen(
 ) {
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var showDataSourceDialog by remember { mutableStateOf(false) }
+    var showAutoUpdateDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    
+    // Auto update interval text helper
+    val autoUpdateText = when(mainViewModel.autoUpdateInterval) {
+        0L -> "不设置"
+        else -> "${mainViewModel.autoUpdateInterval}min"
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         // Header
         Row(
@@ -110,15 +117,22 @@ fun SettingsScreen(
         )
         SettingsItem(
             icon = Icons.Outlined.Update,
+            title = "定时更新",
+            subtitle = autoUpdateText,
+            onClick = { showAutoUpdateDialog = true }
+        )
+        SettingsItem(
+            icon = Icons.Outlined.Update,
             title = "数据更新",
-            subtitle = "冷却剩余",
+            subtitle = if (mainViewModel.isCoolingDown) "冷却剩余: ${mainViewModel.coolingTimeLeft}s" else "",
+            progress = if (mainViewModel.isCoolingDown) mainViewModel.coolingProgress else null,
             onClick = {
-                onUpdateData()
-                scope.launch {
-                    // Simulate a delay or just show updated immediately since refresh() is async but fire-and-forget here
-                    // Ideally we observe loading state, but for this requirement:
-                    delay(500) // Small delay for UX
-                    Toast.makeText(context, "数据更新完成", Toast.LENGTH_SHORT).show()
+                if (mainViewModel.isCoolingDown) {
+                    Toast.makeText(context, "请等待冷却结束", Toast.LENGTH_SHORT).show()
+                } else {
+                    onUpdateData()
+                    mainViewModel.startCoolingDown()
+                    Toast.makeText(context, "开始更新数据", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -205,11 +219,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                // Cloudflare selection logic
                                 Toast.makeText(context, "cloudflare R2源目前不可用", Toast.LENGTH_SHORT).show()
-                                // Do not update data source or close dialog? 
-                                // Or close and don't update?
-                                // "选择cloudflare则弹出提示" - implies selection action triggers toast.
                             }
                             .padding(vertical = 8.dp)
                     ) {
@@ -230,6 +240,50 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showAutoUpdateDialog) {
+        AlertDialog(
+            onDismissRequest = { showAutoUpdateDialog = false },
+            title = { Text("选择定时更新间隔") },
+            text = {
+                Column {
+                    val options = listOf(
+                        0L to "不设置",
+                        5L to "5min",
+                        10L to "10min",
+                        30L to "30min",
+                        60L to "60min"
+                    )
+                    options.forEach { (minutes, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    mainViewModel.updateAutoUpdateInterval(minutes)
+                                    showAutoUpdateDialog = false
+                                }
+                                .padding(vertical = 8.dp)
+                        ) {
+                            RadioButton(
+                                selected = mainViewModel.autoUpdateInterval == minutes,
+                                onClick = {
+                                    mainViewModel.updateAutoUpdateInterval(minutes)
+                                    showAutoUpdateDialog = false
+                                }
+                            )
+                            Text(text = label)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAutoUpdateDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -237,6 +291,7 @@ fun SettingsItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
+    progress: Float? = null,
     onClick: () -> Unit
 ) {
     Card(
@@ -250,23 +305,34 @@ fun SettingsItem(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(text = title, style = MaterialTheme.typography.titleMedium)
-                if (subtitle.isNotEmpty()) {
-                    Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Column {
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(text = title, style = MaterialTheme.typography.titleMedium)
+                    if (subtitle.isNotEmpty()) {
+                        Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
                 }
+            }
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp)
+                )
             }
         }
     }
